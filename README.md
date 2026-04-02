@@ -1,55 +1,55 @@
 ## OpenAI Testrail Refactor Priority Assistant
 
-Пайплайн для TestRail:
-1. бере кейси з секції;
-2. нормалізує/рефакторить текст;
-3. перевіряє пріоритети за Jira story + acceptance criteria;
-4. створює нові refactored кейси в TestRail;
-5. пише звіти в `output/`.
+## TestRail Pipeline:
+1. Fetches test cases from a section
+2. Normalizes/refactors the text
+3. Validates priorities based on Jira story + acceptance criteria
+4. Creates new refactored test cases in TestRail
+5. Writes reports to the `output/` directory
 
-Головний файл запуску: `OpenAI-TestRail.py`.
+Main file: `OpenAI-TestRail.py`.
 
-## Що потрібно
+## Requirements
 
 1. `Python 3.12+`
-2. Пакети з `requirements.txt`
-3. Заповнений `.env`
-4. Доступи:
-   - валідний доступ до TestRail API;
-   - валідний доступ до Jira API.
+2. Packages from `requirements.txt`
+3. Configured `.env` file
+4. Access:
+   - valid TestRail API access
+   - valid Jira API access
 
-Скрипт виконує локальний рефакторинг (`refactor_case_with_agent -> refactor_case_locally`)
+The script performs local refactoring (`refactor_case_with_agent -> refactor_case_locally`)
 
 ## Кроки для локального розгортання проєкту:
 
-1. **Перевірте Python:**
+1. **Check Python:**
    ```
    python3 --version
    ```
 
-2. **Клонуйте репозиторій:**
+2. **Clone the repository:**
    ```
-   git clone <URL_вашого_репозиторію>
-   cd <назва_папки>
+   git clone <YOUR_REPOSITORY_URL>
+   cd <PROJECT_FOLDER_NAME>
    ```
 
-3. **Створіть та активуйте віртуальне середовище:**
+3. **Create and activate a virtual environment:**
    ```
    python3 -m venv venv
    source venv/bin/activate
    ```
 
-4. **Встановіть залежності:**
+4. **Install dependencies:**
    ```
    pip install -r requirements.txt
    ```
 
-5. **Створіть `.env`:**
+5. **Create `.env` file:**
    ```
    cp .env.example .env
    ```
 
-6. **Заповніть `.env` вашими значеннями:**
+6. **Fill in `.env` file with your values:**
    ```
    TESTRAIL_URL=
    TESTRAIL_EMAIL=
@@ -61,7 +61,7 @@
    JIRA_API_TOKEN=
    ``` 
 
-7. **Запустіть скрипт:**
+7. **Run the script:**
    ```bash
    python3 OpenAI-TestRail.py
    ```
