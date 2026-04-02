@@ -10,9 +10,8 @@
 Main file: `OpenAI-TestRail.py`.
 
 ## Requirements
-
-1. `Python 3.12+`
-2. Packages from `requirements.txt`
+1. Installed `Python 3.12+`
+2. Installed packages from `requirements.txt`
 3. Configured `.env` file
 4. Access:
    - valid TestRail API access
@@ -20,7 +19,7 @@ Main file: `OpenAI-TestRail.py`.
 
 The script performs local refactoring (`refactor_case_with_agent -> refactor_case_locally`)
 
-## Кроки для локального розгортання проєкту:
+## Steps to run the project locally:
 
 1. **Check Python:**
    ```
@@ -49,7 +48,7 @@ The script performs local refactoring (`refactor_case_with_agent -> refactor_cas
    cp .env.example .env
    ```
 
-6. **Fill in `.env` file with your values:**
+6. **Fill in `.env` file:**
    ```
    TESTRAIL_URL=
    TESTRAIL_EMAIL=
