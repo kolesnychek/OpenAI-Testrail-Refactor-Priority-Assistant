@@ -2260,6 +2260,8 @@ async def main():
         validation_error_cls=ValidationError,
         jira_subagent=jira_subagent,
         priority_rules_skill=priority_rules_skill,
+        priority_id_low=PRIORITY_ID_LOW,
+        priority_id_medium=PRIORITY_ID_MEDIUM,
         priority_id_high=PRIORITY_ID_HIGH,
     )
 
