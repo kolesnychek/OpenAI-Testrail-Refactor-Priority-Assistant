@@ -26,6 +26,8 @@ class MainRefactorAgent:
         validation_error_cls: type[Exception],
         jira_subagent: JiraTicketPrioritySubagent,
         priority_rules_skill: PriorityRulesSkill,
+        priority_id_low: int,
+        priority_id_medium: int,
         priority_id_high: int,
     ):
         self._refactor_case = refactor_case
@@ -33,6 +35,8 @@ class MainRefactorAgent:
         self._validation_error_cls = validation_error_cls
         self.jira_subagent = jira_subagent
         self.priority_rules_skill = priority_rules_skill
+        self.priority_id_low = priority_id_low
+        self.priority_id_medium = priority_id_medium
         self.priority_id_high = priority_id_high
         self.subagent_name = jira_subagent.name
 
@@ -93,7 +97,7 @@ class MainRefactorAgent:
         if priority_stage_enabled and priority_run_confirmed:
             log("[AGENT:MAIN] Delegating story analysis to subagent")
             priority_audits = await self.jira_subagent.analyze_section(session, results)
-            self._ensure_at_least_one_high_with_best_ac_overlap(priority_audits)
+            self._rebalance_section_priority_distribution(priority_audits)
 
             by_case_id = {a.get("case_id"): a for a in priority_audits}
             for result in results:
@@ -133,47 +137,173 @@ class MainRefactorAgent:
                         audit["application_rule"] = decision.application_rule
                         audit["application_explanation"] = decision.application_explanation
 
+                self._enforce_mandatory_low_after_rule_application(results)
+
             json_dump(os.path.join(output_dir, f"jira-analysis-{ts}.json"), priority_audits)
             log(f"Saved Jira priority analysis JSON: jira-analysis-{ts}.json")
 
         return priority_audits, priority_stage_enabled, priority_run_confirmed, priority_approved
 
-    def _ensure_at_least_one_high_with_best_ac_overlap(self, audits: list[dict]) -> None:
+    def _rebalance_section_priority_distribution(self, audits: list[dict]) -> None:
         if not audits:
             return
 
-        eligible: list[dict] = [
-            audit for audit in audits
-            if isinstance(audit.get("matched_acceptance_criteria_ids"), list)
-            and len(audit.get("matched_acceptance_criteria_ids", [])) > 0
-        ]
-        if not eligible:
+        normalized_audits = [audit for audit in audits if isinstance(audit, dict)]
+        if not normalized_audits:
             return
 
-        already_high = any(self._to_int(audit.get("proposed_priority_id")) == self.priority_id_high for audit in eligible)
-        if already_high:
-            return
+        def ac_match_count(audit: dict) -> int:
+            matches = audit.get("matched_acceptance_criteria_ids")
+            return len(matches) if isinstance(matches, list) else 0
 
-        best = max(
-            eligible,
+        def relevance_score(audit: dict) -> float:
+            raw = audit.get("selected_story_relevance")
+            try:
+                return float(raw or 0.0)
+            except (TypeError, ValueError):
+                return 0.0
+
+        def risk_score(audit: dict) -> int:
+            try:
+                return int(audit.get("case_risk_score") or 0)
+            except (TypeError, ValueError):
+                return 0
+
+        def impact_score(audit: dict) -> int:
+            try:
+                return int(audit.get("case_impact_score") or 0)
+            except (TypeError, ValueError):
+                return 0
+
+        def case_id_score(audit: dict) -> int:
+            try:
+                return int(audit.get("case_id") or 0)
+            except (TypeError, ValueError):
+                return 0
+
+        ranked_strongest = sorted(
+            normalized_audits,
             key=lambda audit: (
-                len(audit.get("matched_acceptance_criteria_ids", [])),
-                float(audit.get("selected_story_relevance") or 0.0),
-                int(audit.get("case_risk_score") or 0),
-                int(audit.get("case_impact_score") or 0),
+                ac_match_count(audit),
+                relevance_score(audit),
+                risk_score(audit),
+                impact_score(audit),
+                -case_id_score(audit),
+            ),
+            reverse=True,
+        )
+        ranked_weakest = sorted(
+            normalized_audits,
+            key=lambda audit: (
+                ac_match_count(audit),
+                relevance_score(audit),
+                risk_score(audit),
+                impact_score(audit),
+                case_id_score(audit),
             ),
         )
-        best["proposed_priority_id"] = self.priority_id_high
-        current_priority = self._to_int(best.get("current_priority_id"))
-        if current_priority is not None:
-            best["changed"] = current_priority != self.priority_id_high
+
+        total = len(normalized_audits)
+        if total >= 3:
+            target_high_count = 2
+        elif total == 2:
+            target_high_count = 1
         else:
-            best["changed"] = True
-        reasons = best.get("reasons")
+            target_high_count = 0
+
+        low_case = ranked_weakest[0]
+        high_cases: list[dict] = []
+        for candidate in ranked_strongest:
+            if candidate is low_case:
+                continue
+            high_cases.append(candidate)
+            if len(high_cases) >= target_high_count:
+                break
+
+        for audit in normalized_audits:
+            if audit is low_case:
+                target_priority = self.priority_id_low
+                distribution_reason = (
+                    "Section distribution rule: assigned LOW to the weakest acceptance-criteria match."
+                )
+                audit["section_forced_low_candidate"] = True
+            elif any(audit is high_case for high_case in high_cases):
+                target_priority = self.priority_id_high
+                distribution_reason = (
+                    "Section distribution rule: assigned HIGH to one of the strongest acceptance-criteria matches."
+                )
+                audit["section_forced_low_candidate"] = False
+            else:
+                target_priority = self.priority_id_medium
+                distribution_reason = (
+                    "Section distribution rule: assigned MEDIUM because case is neither strongest nor weakest AC match."
+                )
+                audit["section_forced_low_candidate"] = False
+
+            audit["proposed_priority_id"] = target_priority
+            current_priority = self._to_int(audit.get("current_priority_id"))
+            if current_priority is not None:
+                audit["changed"] = current_priority != target_priority
+            else:
+                audit["changed"] = True
+
+            reasons = audit.get("reasons")
+            if not isinstance(reasons, list):
+                reasons = []
+                audit["reasons"] = reasons
+            reasons.append(distribution_reason)
+
+    def _enforce_mandatory_low_after_rule_application(self, results: list[dict]) -> None:
+        prepared = [result for result in results if result.get("status") == "prepared_only"]
+        if not prepared:
+            return
+
+        already_has_low = any(
+            self._to_int((result.get("refactored") or {}).get("priority_id")) == self.priority_id_low
+            for result in prepared
+        )
+        if already_has_low:
+            return
+
+        low_candidate_result = next(
+            (
+                result
+                for result in prepared
+                if bool((result.get("priority_audit") or {}).get("section_forced_low_candidate"))
+            ),
+            None,
+        )
+        if low_candidate_result is None:
+            return
+
+        audit = low_candidate_result.get("priority_audit") or {}
+        refactored = low_candidate_result.get("refactored") or {}
+        current_priority = self._to_int((low_candidate_result.get("raw_case") or {}).get("priority_id"))
+
+        refactored["priority_id"] = self.priority_id_low
+        existing_reason = str(refactored.get("priority_reason") or "").strip()
+        guardrail_reason = "Section mandatory LOW guardrail: ensured minimum one LOW case in section"
+        if existing_reason:
+            refactored["priority_reason"] = f"{existing_reason}; {guardrail_reason}"
+        else:
+            refactored["priority_reason"] = guardrail_reason
+        low_candidate_result["refactored"] = refactored
+
+        audit["applied_priority_id"] = self.priority_id_low
+        audit["application_rule"] = "Section mandatory LOW guardrail applied"
+        audit["application_explanation"] = (
+            "Rules stage removed LOW downgrade, so section-level minimum LOW policy was enforced."
+        )
+        if current_priority is not None:
+            audit["changed"] = current_priority != self.priority_id_low
+        else:
+            audit["changed"] = True
+        reasons = audit.get("reasons")
         if not isinstance(reasons, list):
             reasons = []
-            best["reasons"] = reasons
-        reasons.append("Section guardrail: ensured at least one HIGH case with strongest AC overlap")
+            audit["reasons"] = reasons
+        reasons.append("Section mandatory LOW guardrail enforced after rule application")
+        low_candidate_result["priority_audit"] = audit
 
     @staticmethod
     def _to_int(value: Any) -> int | None:
