@@ -45,7 +45,7 @@ The script performs local refactoring (`refactor_case_with_agent -> refactor_cas
 
 5. **Create `.env` file:**
    ```
-   cp env.example .env
+   cp .env.example .env
    ```
 
 6. **Fill in `.env` file:**
