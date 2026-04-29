@@ -174,3 +174,119 @@ def test_extract_acceptance_criteria_from_acceptance_block_bullets():
     items = mod.extract_acceptance_criteria_items(text)
     ids = [item["id"] for item in items]
     assert ids == ["1", "2"]
+
+
+def test_step_action_preserves_leading_du_role():
+    mod = _load_module()
+    out = mod.normalize_step_action("As DU tap on Call button")
+    assert out.startswith("As DU")
+
+
+def test_preconditions_qA_environment_links_only_environment_word():
+    mod = _load_module()
+    source = "1. QA environment -> https://qa.example.com"
+    out = mod.normalize_preconditions(source)
+    assert "[environment](https://qa.example.com)" in out
+    assert "[QA environment](https://qa.example.com)" not in out
+
+
+def test_refactor_case_splits_alternating_steps_and_moves_global_expected_to_last_step():
+    mod = _load_module()
+    raw_case = {
+        "title": "Team support and transfer flow",
+        "custom_preconds": "LLL is the lead VI\nSSS is the support VI\nNN1 is next VI\n2 Voice numbers are needed",
+        "custom_steps": (
+            "Convo User calls voice number\n"
+            "Vi #LLL answers the call\n"
+            "and VI #LLL calls to the voice number written in dialpad\n"
+            "and hearing User answers the call\n"
+            "VI #LLL calls vco-3 way\n"
+            "and VCO-3 way answers the call\n"
+            "VI #LLL clicks on team support button\n"
+            "and VI #SSS answers the team request\n"
+            "and VI #SSS clicks on ready button"
+        ),
+        "custom_expected": (
+            "Then support VI is hidden(cannot be heard) for voice(hearing user), convo user and vco-3way(hearing user), and support VI can hear everybody\n"
+            "and support VI can see customer, but customer cannot see support VI\n"
+            "and lead vi can hear everybody, and lead VI can see customer and customer can see lead VI\n"
+            "and chat is working"
+        ),
+    }
+
+    out = mod.refactor_case_locally(raw_case)
+    steps = out["steps"]
+
+    assert len(steps) == 5
+    assert steps[0]["action"] == "Convo User calls voice number"
+    assert "answers the call" in steps[0]["expected_result"]
+    assert not steps[1]["action"].lower().startswith("and ")
+    assert "1. Support VI" in steps[-1]["expected_result"]
+    assert "4. Chat is working" in steps[-1]["expected_result"]
+    assert out["global_expected_result"] == ""
+
+
+def test_detect_template_forces_steps_even_for_steps_separated_source():
+    mod = _load_module()
+    case = {"custom_steps_separated": [{"content": "A", "expected": "B"}]}
+    assert mod.detect_template(case) == "steps_separated"
+
+
+def test_build_payload_in_steps_separated_template_uses_custom_steps_separated():
+    mod = _load_module()
+    ai_result = {
+        "title": "Refactored",
+        "preconditions": "1. P",
+        "steps": [
+            {"action": "DU calls voice number", "expected_result": "VI #LLL answers the call"},
+            {"action": "VI #SSS clicks on ready button", "expected_result": "1. Chat is working"},
+        ],
+        "global_expected_result": "",
+    }
+    payload = mod.build_testrail_payload(ai_result, "steps_separated")
+    assert "custom_steps_separated" in payload
+    assert "custom_steps" not in payload
+    assert "custom_expected" not in payload
+    assert payload["custom_steps_separated"][0]["content"] == "DU calls voice number"
+    assert payload["custom_steps_separated"][0]["expected"] == "VI #LLL answers the call"
+
+
+def test_refactor_case_pairs_place_call_with_watch_radar_expected():
+    mod = _load_module()
+    raw_case = {
+        "title": "911 flow",
+        "custom_preconds": "1. Preconditions",
+        "custom_steps": (
+            "Place a 911 call from Convo Link to Convo Interpreter\n"
+            "watch radar when the call is answered\n"
+            "and VI #SSS clicks on ready button"
+        ),
+        "custom_expected": "and chat is working",
+    }
+
+    out = mod.refactor_case_locally(raw_case)
+    steps = out["steps"]
+
+    assert len(steps) >= 2
+    assert steps[0]["action"].lower().startswith("place a 911 call")
+    assert "watch radar" in steps[0]["expected_result"].lower()
+    assert "answered" in steps[0]["expected_result"].lower()
+    assert not steps[1]["action"].lower().startswith("and ")
+
+
+def test_tail_expected_keeps_photo_unumbered_and_numbers_text_only():
+    mod = _load_module()
+    raw_case = {
+        "title": "Photo in final expected",
+        "custom_preconds": "1. Preconditions",
+        "custom_steps": "VI clicks on ready button",
+        "custom_expected": "support VI can hear everybody\nphoto\nchat is working",
+    }
+
+    out = mod.refactor_case_locally(raw_case)
+    last_expected = out["steps"][-1]["expected_result"]
+
+    assert "1. Support VI" in last_expected
+    assert "\nphoto\n" in f"\n{last_expected}\n"
+    assert "2. Chat is working" in last_expected
+    assert "2. photo" not in last_expected
