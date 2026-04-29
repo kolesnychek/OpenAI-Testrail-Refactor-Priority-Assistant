@@ -28,8 +28,8 @@ The script performs local refactoring (`refactor_case_with_agent -> refactor_cas
 
 2. **Clone the repository:**
    ```
-   git clone <YOUR_REPOSITORY_URL>
-   cd <PROJECT_FOLDER_NAME>
+   git clone <YOUR_REPOSITORY_URL> (e.g. 'https://github.com/kolesnychek/OpenAI-Testrail-Refactor-Priority-Assistant')
+   cd <PROJECT_FOLDER_NAME> (e.g. 'OpenAI-Testrail-Refactor-Priority-Assistant')
    ```
 
 3. **Create and activate a virtual environment:**
