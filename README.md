@@ -58,6 +58,12 @@ The script performs local refactoring (`refactor_case_with_agent -> refactor_cas
    JIRA_BASE_URL=
    JIRA_USER_EMAIL=
    JIRA_API_TOKEN=
+
+   #optional (if only one test case needs to be updated)
+   CASE_IDS=
+   #optional (if the updated test case needs to switch the template to 'Steps')
+   FORCE_REFACTORED_TEMPLATE_STEPS_SEPARATED=yes
+   TESTRAIL_STEPS_SEPARATED_TEMPLATE_ID=2
    ``` 
 
 7. **Run the script:**
