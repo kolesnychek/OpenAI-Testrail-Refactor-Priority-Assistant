@@ -917,6 +917,53 @@ def split_numbered_lines(text: str) -> list[str]:
     return out
 
 
+def explode_multiline_items(lines: list[str]) -> list[str]:
+    out: list[str] = []
+    for line in lines:
+        normalized = strip_html_markup(safe_str(line))
+        parts = [part.strip() for part in re.split(r"\r?\n", normalized) if part.strip()]
+        if parts:
+            out.extend(parts)
+    return out
+
+
+def split_multiline_step_entry(action: str, expected: str) -> list[dict[str, str]]:
+    combined_lines = explode_multiline_items(split_numbered_lines(f"{safe_str(action)}\n{safe_str(expected)}"))
+    rebuilt: list[dict[str, str]] = []
+    trailing_expected_lines: list[str] = []
+    idx = 0
+    while idx < len(combined_lines):
+        current_action = strip_leading_connector(combined_lines[idx])
+        if not current_action:
+            idx += 1
+            continue
+
+        if rebuilt and not looks_like_action_line(current_action):
+            trailing_expected_lines.append(current_action)
+            idx += 1
+            continue
+
+        current_expected = ""
+
+        if idx + 1 < len(combined_lines):
+            nxt = strip_leading_connector(combined_lines[idx + 1])
+            if looks_like_action_line(current_action) and looks_like_expected_line(nxt) and not looks_like_action_line(nxt):
+                current_expected = nxt
+                idx += 1
+
+        rebuilt.append({"action": current_action, "expected_result": current_expected})
+        idx += 1
+
+    if rebuilt and trailing_expected_lines:
+        existing_last_expected = safe_str(rebuilt[-1].get("expected_result"))
+        combined_expected_lines = split_numbered_lines(
+            "\n".join(filter(None, [existing_last_expected, *trailing_expected_lines]))
+        )
+        rebuilt[-1]["expected_result"] = format_tail_expected_block(combined_expected_lines)
+
+    return rebuilt
+
+
 def extract_markdown_images(text: str) -> list[str]:
     if not text:
         return []
@@ -1200,11 +1247,20 @@ def extract_steps(raw_case: dict) -> tuple[list[dict], str]:
             expected = normalize_text(safe_str(item.get("expected")))
             if action:
                 steps.append({"action": action, "expected_result": expected})
+        if len(steps) == 1:
+            expanded_steps = split_multiline_step_entry(
+                steps[0].get("action", ""),
+                steps[0].get("expected_result", ""),
+            )
+            if len(expanded_steps) > 1:
+                return expanded_steps, ""
         return steps, ""
 
-    step_lines_raw = split_numbered_lines(safe_str(raw_case.get("custom_steps")))
+    raw_steps_text = strip_html_markup(safe_str(raw_case.get("custom_steps")))
+    raw_expected_text = strip_html_markup(safe_str(raw_case.get("custom_expected")))
+    step_lines_raw = explode_multiline_items(split_numbered_lines(raw_steps_text))
     step_lines = [strip_leading_connector(line) for line in step_lines_raw if strip_leading_connector(line)]
-    expected_lines = split_numbered_lines(safe_str(raw_case.get("custom_expected")))
+    expected_lines = explode_multiline_items(split_numbered_lines(raw_expected_text))
 
     steps: list[dict] = []
     paired_count = 0
@@ -1315,6 +1371,15 @@ def build_testrail_payload(ai_result: dict, template: str) -> dict:
         for step in ai_result["steps"]:
             action = (step.get("action") or "").strip()
             expected = (step.get("expected_result") or "").strip()
+            expanded_steps = split_multiline_step_entry(action, expected)
+            if len(expanded_steps) > 1:
+                for expanded in expanded_steps:
+                    if expanded.get("action"):
+                        steps_payload.append({
+                            "content": expanded.get("action", "").strip(),
+                            "expected": expanded.get("expected_result", "").strip(),
+                        })
+                continue
             if action:
                 steps_payload.append({"content": action, "expected": expected})
 
